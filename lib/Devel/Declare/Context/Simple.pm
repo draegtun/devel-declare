@@ -282,3 +282,324 @@ sub inject_scope {
 
 1;
 # vi:sw=2 ts=2
+
+__END__
+
+=head1 NAME
+
+Devel::Declare::Context::Simple - Parser utilities for Devel::Declare
+
+=head1 VERSION
+
+See Devel::Declare
+
+
+=head1 SYNOPSIS
+
+Devel::Declare::Context::Simple is a base class:
+
+
+    package Foo;
+    use Devel::Declare ();
+    use base 'Devel::Declare::Context::Simple';
+    
+    sub import {
+        my $class = shift;
+        my $ctx   = __PACKAGE__->new;
+        
+        ... Devel::Declare stuff ...
+    }
+    
+    
+
+=head1 DESCRIPTION
+
+The Devel::Declare::Context::Simple base class help maintains parsing state and provides handy utility methods.
+
+    package Shout;
+    use Devel::Declare ();
+    use base 'Devel::Declare::Context::Simple';
+
+    sub import {
+        my $class  = shift;
+        my $caller = caller;
+        my $ctx    = __PACKAGE__->new;
+
+        Devel::Declare->setup_for(
+            $caller,
+            {
+                shout => {
+                    const => sub { $ctx->parser(@_) },
+                },
+            },
+        );
+
+        no strict 'refs';
+        *{$caller.'::shout'} = sub ($) { uc $_[0] ) };
+    }
+
+    sub parser {
+        my $self = shift;
+        $self->init(@_);
+        $self->skip_declarator;          # skip past "shout"
+        $self->skipspace;
+        
+        my $line = $self->get_linestr;   # get me current line of code
+
+        # insert q 
+        substr( $line, $self->offset, 0 ) = ' q';
+
+        # pass back to parser
+        $self->set_linestr( $line );
+    }
+
+    1;
+
+Then later:
+
+    use Shout;
+    
+    shout/say this out loud!/;      # => SAY THIS OUT LOUD!
+    
+    # Because Devel::Declare converted this to:   shout q/say this out loud!/;
+    
+    
+
+=head1 EXPORT
+
+None.
+
+
+=head1 ATTRIBUTES
+
+=head2 Declarator
+
+The declarator name, ie. the new keyword (token) we declared.
+
+=head2 Offset
+
+Initially this is the position from beginning of line where the declarator was found.
+
+NB. There should be no need to amend these attributes manually.  Leave it all to methods below.
+
+
+=head1 METHODS
+
+=head2 new
+
+Your normal constructor.
+
+=head2 init
+
+Initialise the L<"Declarator"> and L<"Offset">  attributes for this parse.
+
+=head2 offset
+
+Returns the L<"Offset"> attribute for current parse.
+
+    my $current_position = $self->offset;
+
+=head2 inc_offset
+
+Increments the L<"Offset">.
+
+    $self->inc_offset( 10 );   # move offset 10 characters on.
+
+
+=head2 declarator
+
+Returns the L<"Declarator"> attribute for current parse
+
+    my $which_keyword_was_just_parsed = $self->declarator;
+
+
+=head2 skip_declarator
+
+Make the parser skip past the declarator.  The L<"Offset"> attribute now points to next character after it.
+
+    sub parser {
+        my $self = shift;
+        $self->init(@_);
+        
+        my $declarator_pos = $self->offset;  # points to first char of declarator
+        
+        $self->skip_declarator;              # skip past declarator
+        
+        my $pos_straight_after_declarator = $self->offset;
+    }
+
+
+=head2 skipspace
+
+Makes the parser skip any whitespace.
+
+    $self->skipspace;
+    
+    my $now_on_next_non_whitespace_char = $self->offset;
+
+
+
+=head2 get_linestr 
+
+Get the complete line of code that the parser as hit.
+
+    my $line_of_code = $self->get_linestr;
+
+
+
+=head2 set_linestr
+
+Replaces the current line of code.  This is the code that Perl will compile.
+
+    $self->set_linestr( $my_new_line_of_code );
+
+
+=head2 strip_name
+
+Will strip out the next 'token' it finds, return it and update L<"Offset"> accordingly.
+
+This is useful for parsing things like.
+
+    func shout { ... }
+
+Where 'func' triggered the parser: 
+        
+    $self->skip_declarator;         # skip past 'func' declarator
+    
+    my $name = $self->strip_name;   # this strips & returns 'shout'
+    
+    my $line = $self->get_linestr;  # this will now look like:  func { }
+    
+    my $pos = $self->offset;        # will be pointing at space just after 'func'
+
+
+
+=head2 strip_ident
+
+TBD.
+
+=head2 strip_proto
+
+Strips and returns next bit of code if it looks like sub proto (ie. something within parenthesis) 
+
+This is useful for parsing things like:
+
+    func shout($x,$y) { ... }
+    
+Which would be done like this:
+
+    $self->skip_declarator;         # skip past 'func' declarator
+
+    my $name = $self->strip_name;   # this strips & returns:  shout
+    
+    my $proto = $self->strip_proto; # strips and returns:    $x,$y
+
+    my $line = $self->get_linestr;  # this will now look like:  func { }
+
+
+=head2 strip_names_and_args 
+
+This is like L<"strip_name"> but also parses the proto declaration.
+
+For eg:
+
+    func shout(Str $x, Int $y) { ... }
+    
+Then:
+
+    my $args = $self->strip_names_and_args;     # strips and returns array_ref with args
+
+    # $args =>
+    # [
+    #   [ 'Str', '$x' ],
+    #   [ 'Int', '$y' ],
+    # ]
+
+NB. Note to myself... double check this is how it works :)
+
+
+=head2 strip_attrs 
+
+Strips and returns next bit of code if it looks like a sub attribute.
+
+For eg:
+
+    func shout : attr1 { ... }
+    
+    # or
+    
+    func shout() : attr1 { ... }
+    
+Then:
+
+    my $proto = $self->strip_proto; # just in case!
+    
+    my $attr = $self->strip_attr;   # strips and returns:    attr1
+    
+
+=head2 get_curstash_name
+
+This returns the package name currently being compiled.
+
+
+=head2 shadow
+
+Need my brain in gear to document this bit properly!
+
+Shadow sub replacement method.
+
+
+=head2 inject_if_block
+
+Injects extra code into the start of a block.
+
+For eg.
+
+    func shout { ... }
+    
+Then.
+
+    $self->inject_if_block( ' my $self = shift; ' );
+    
+Would transform it to:
+
+    func shout { my $self = shift; ... }
+
+
+
+=head2 scope_injector_call
+
+See L<Devel::Declare/"scope_injector_call"> for a complete description.
+
+
+
+=head2 inject_scope
+
+Again, see L<Devel::Declare/"scope_injector_call"> for full info.
+
+
+
+
+=head1 AUTHORS
+
+Matt S Trout - E<lt>mst@shadowcat.co.ukE<gt> - original author
+
+Florian Ragwitz E<lt>rafl@debian.orgE<gt> - maintainer
+
+osfameron E<lt>osfameron@cpan.orgE<gt> - first draft of documentation
+
+Barry Walsh, C<< <draegtun at cpan.org> >> - first draft of D::D::Context::Simple docs
+
+
+=head1 COPYRIGHT AND LICENSE
+
+This library is free software under the same terms as perl itself
+
+Copyright (c) 2007, 2008, 2009  Matt S Trout
+
+Copyright (c) 2008, 2009  Florian Ragwitz
+
+stolen_chunk_of_toke.c based on toke.c from the perl core, which is
+
+Copyright (C) 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999,
+2000, 2001, 2002, 2003, 2004, 2005, 2006, by Larry Wall and others
